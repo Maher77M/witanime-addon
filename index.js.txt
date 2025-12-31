@@ -6,22 +6,15 @@ const cache = require("memory-cache");
 const manifest = require("./manifest.json");
 const builder = new addonBuilder(manifest);
 
-// إعدادات عامة
-const BASE_URL = "https://witanime.day";
-const CACHE_TIME = 3600000; // ساعة واحدة
+const BASE_URL = "https://otanyuu.cyou";
+const CACHE_TIME = 3600000;
 
-// User-Agent عشان نتجنب الحظر
 const headers = {
   "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 };
 
-// الكاتالوج + البحث
 builder.defineCatalogHandler(async ({ type, id, extra = {} }) => {
   if (type !== "series" || id !== "witanime") return { metas: [] };
-
-  const cacheKey = `catalog_${extra.search || "home"}_${extra.skip || 0}`;
-  const cached = cache.get(cacheKey);
-  if (cached) return cached;
 
   let url = BASE_URL;
   if (extra.search) {
@@ -29,25 +22,19 @@ builder.defineCatalogHandler(async ({ type, id, extra = {} }) => {
   }
 
   try {
-    const res = await axios.get(url, { headers, timeout: 10000 });
+    const res = await axios.get(url, { headers });
     const $ = cheerio.load(res.data);
 
     const metas = [];
-    $(".anime-list-item, .anime-card, .episode-card").each((i, elem) => {
-      const linkElem = $(elem).find("a").first();
-      const href = linkElem.attr("href");
-      if (!href) return;
+    $(".post-item, .anime-card").each((i, elem) => {
+      const link = $(elem).find("a").attr("href");
+      const title = $(elem).find(".post-title, h3").text().trim();
+      const poster = $(elem).find("img").attr("src") || $(elem).find("img").attr("data-src");
+      const slug = link ? link.split("/anime/")[1]?.replace("/", "") : null;
 
-      const animeSlug = href.includes("/anime/") 
-        ? href.split("/anime/")[1]?.replace("/", "") 
-        : href.split("/episode/")[1]?.split("-الحلقة-")[0];
-
-      const title = linkElem.attr("title") || $(elem).find(".anime-title, h3").text().trim();
-      const poster = $(elem).find("img").attr("data-src") || $(elem).find("img").attr("src");
-
-      if (title && animeSlug) {
+      if (title && slug) {
         metas.push({
-          id: animeSlug,
+          id: slug,
           name: title,
           type: "series",
           poster: poster?.startsWith("http") ? poster : BASE_URL + poster
@@ -55,114 +42,74 @@ builder.defineCatalogHandler(async ({ type, id, extra = {} }) => {
       }
     });
 
-    const result = { metas };
-    cache.put(cacheKey, result, CACHE_TIME);
-    return result;
+    return { metas };
   } catch (e) {
     return { metas: [] };
   }
 });
 
-// الميتاداتا + قائمة الحلقات الدقيقة
 builder.defineMetaHandler(async ({ type, id }) => {
   const animeSlug = id.split(":")[0];
-  const cacheKey = `meta_${animeSlug}`;
-  const cached = cache.get(cacheKey);
-  if (cached) return cached;
 
   try {
     const url = `${BASE_URL}/anime/${animeSlug}/`;
-    const res = await axios.get(url, { headers, timeout: 10000 });
+    const res = await axios.get(url, { headers });
     const $ = cheerio.load(res.data);
 
-    const name = $("h1.anime-title, .anime-details-title").first().text().trim();
-    const description = $(".anime-story, .synopsis").text().trim();
-    const poster = $(".anime-poster img").attr("data-src") || $(".anime-poster img").attr("src");
+    const name = $(".anime-title").text().trim();
+    const description = $(".synopsis").text().trim();
+    const poster = $(".anime-poster img").attr("src");
 
     const videos = [];
-    $(".episodes-list a, .episode-item a").each((i, elem) => {
+    $(".episodes-list a").each((i, elem) => {
       const href = $(elem).attr("href");
-      const title = $(elem).text().trim();
-      const epMatch = title.match(/(\d+)/);
-      if (epMatch && href) {
-        const epNum = epMatch[1];
-        const epSlug = href.split("/episode/")[1]?.replace("-الحلقة-" + epNum, "").replace("/", "");
+      const epNum = $(elem).text().match(/\d+/) ? $(elem).text().match(/\d+/)[0] : null;
+      if (epNum && href) {
+        const epSlug = href.split("/episode/")[1]?.split("-")[0];
         videos.push({
           id: `${epSlug || animeSlug}:${epNum}`,
           title: `الحلقة ${epNum}`,
-          episode: parseInt(epNum),
-          season: 1
+          episode: parseInt(epNum)
         });
       }
     });
 
-    // ترتيب الحلقات تصاعدياً
     videos.sort((a, b) => a.episode - b.episode);
 
-    const result = {
-      meta: {
-        id: animeSlug,
-        name: name || "أنمي من WitAnime",
-        type: "series",
-        description: description || "أنمي مترجم عربي",
-        poster: poster?.startsWith("http") ? poster : BASE_URL + poster,
-        videos
-      }
-    };
-
-    cache.put(cacheKey, result, CACHE_TIME * 2); // كاش أطول للميتاداتا
-    return result;
+    return { meta: { id: animeSlug, name, type: "series", description, poster, videos } };
   } catch (e) {
-    return { meta: { id, name: "غير متوفر", type: "series", videos: [] } };
+    return { meta: { videos: [] } };
   }
 });
 
-// الروابط (Streams) - بث وتحميل
 builder.defineStreamHandler(async ({ type, id }) => {
   const [animeSlug, episode] = id.split(":");
-  const cacheKey = `stream_${id}`;
-  const cached = cache.get(cacheKey);
-  if (cached) return cached;
 
-  const url = `${BASE_URL}/episode/${animeSlug}-الحلقة-${episode}/`;
+  const url = `${BASE_URL}/episode/${animeSlug}-${episode}/`;
 
   try {
-    const res = await axios.get(url, { headers, timeout: 15000 });
+    const res = await axios.get(url, { headers });
     const $ = cheerio.load(res.data);
 
     const streams = [];
 
-    // 1. روابط التحميل المباشرة (الأكثر موثوقية)
-    $(".download-links a, .download-button").each((i, elem) => {
+    $(".servers a, .download-links a").each((i, elem) => {
       const link = $(elem).attr("href");
-      let quality = $(elem).text().trim();
-      if (quality.includes("FHD")) quality = "1080p";
-      else if (quality.includes("HD")) quality = "720p";
-      else if (quality.includes("SD")) quality = "480p";
-
-      if (link && link !== "#" && link.startsWith("http")) {
-        streams.push({
-          url: link,
-          title: `${quality || "تحميل"} - WitAnime`,
-          behaviorHints: { notWebReady: false } // يسمح بالبث أو التحميل
-        });
+      const title = $(elem).text().trim();
+      if (link && link.startsWith("http")) {
+        streams.push({ url: link, title: `${title || "بث/تحميل"} - Otanyuu` });
       }
     });
 
-    // 2. روابط البث المباشر (iframes)
     $("iframe").each((i, elem) => {
-      let src = $(elem).attr("data-src") || $(elem).attr("src");
+      const src = $(elem).attr("src");
+      if (src && src.startsWith("//")) src = "https:" + src;
       if (src && src.startsWith("http")) {
-        streams.push({
-          url: src,
-          title: "بث مباشر - WitAnime"
-        });
+        streams.push({ url: src, title: "بث مباشر - Otanyuu" });
       }
     });
 
-    const result = { streams: streams.length > 0 ? streams : [] };
-    cache.put(cacheKey, result, CACHE_TIME / 2); // كاش أقصر للروابط
-    return result;
+    return { streams };
   } catch (e) {
     return { streams: [] };
   }
