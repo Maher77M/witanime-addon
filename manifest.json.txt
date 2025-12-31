@@ -1,0 +1,20 @@
+{
+  "id": "com.my.witanimeaddon",
+  "version": "1.0.0",
+  "name": "WitAnime خاص",
+  "description": "إضافة خاصة لأنمي WitAnime مع ترجمة عربية مدمجة",
+  "resources": ["catalog", "meta", "stream"],
+  "types": ["series"],
+  "catalogs": [
+    {
+      "type": "series",
+      "id": "witanime",
+      "name": "WitAnime - أنمي مترجم عربي",
+      "extra": [
+        { "name": "search", "isRequired": false },
+        { "name": "skip", "isRequired": false }
+      ]
+    }
+  ],
+  "idPrefixes": [""]
+}
